@@ -1,0 +1,44 @@
+# Blueprint de Render (Infrastructure as Code): un servicio web construido desde el
+# Dockerfile del repositorio + una base PostgreSQL gratuita. Render conecta las
+# variables de la base al servicio; GitHub Actions no necesita ningun Secret.
+services:
+  - type: web
+    name: carreno-post1-u12
+    runtime: docker
+    plan: free
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /actuator/health
+    autoDeploy: true
+    envVars:
+      - key: SPRING_PROFILES_ACTIVE
+        value: prod
+      # Primer despliegue sobre una base vacia: Hibernate crea la tabla.
+      # Una vez creada, se puede cambiar a "validate" desde el panel.
+      - key: JPA_DDL_AUTO
+        value: update
+      - key: DB_HOST
+        fromDatabase:
+          name: catalogo-db
+          property: host
+      - key: DB_PORT
+        fromDatabase:
+          name: catalogo-db
+          property: port
+      - key: DB_NAME
+        fromDatabase:
+          name: catalogo-db
+          property: database
+      - key: DATASOURCE_USER
+        fromDatabase:
+          name: catalogo-db
+          property: user
+      - key: DATASOURCE_PASSWORD
+        fromDatabase:
+          name: catalogo-db
+          property: password
+
+databases:
+  - name: catalogo-db
+    plan: free
+    databaseName: appdb
+    user: appuser
