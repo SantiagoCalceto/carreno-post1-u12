@@ -1,0 +1,139 @@
+# Pipeline de integracion continua del laboratorio U12.
+# Se ejecuta en cada push y pull request a main:
+#   1. build-and-test: compila, corre las pruebas y el gate de cobertura (mvn clean verify)
+#   2. docker-build:   construye la imagen con el MISMO Dockerfile de la Parte 1, la levanta
+#                      dentro del runner y verifica /actuator/health (perfil dev y perfil prod
+#                      contra un PostgreSQL real). La imagen NO se publica en ningun registro.
+name: CI — Build, Test & Docker Image
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  # ── Job 1: Compilar y ejecutar pruebas ──────────────────────────
+  build-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout del código
+        uses: actions/checkout@v4
+
+      - name: Configurar JDK 21 con caché Maven
+        uses: actions/setup-java@v4
+        with:
+          java-version: "21"
+          distribution: "temurin"
+          cache: maven            # reutiliza ~/.m2 entre ejecuciones
+
+      - name: Compilar y ejecutar pruebas
+        run: mvn -B clean verify   # pruebas + jacoco:check (>= 70 % de lineas)
+
+      - name: Publicar reporte de pruebas como artefacto
+        uses: actions/upload-artifact@v4
+        if: always()               # tambien cuando una prueba falla, para poder revisarla
+        with:
+          name: surefire-reports
+          path: target/surefire-reports/
+          retention-days: 7
+
+  # ── Job 2: Construir la imagen y verificar el monitoreo ──────────
+  docker-build:
+    runs-on: ubuntu-latest
+    needs: build-and-test          # solo corre si las pruebas pasaron
+    services:
+      # PostgreSQL efimero para probar el perfil prod tal como correria en Render/Railway
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: appdb
+          POSTGRES_USER: appuser
+          POSTGRES_PASSWORD: apppass
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U appuser -d appdb"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - name: Checkout del código
+        uses: actions/checkout@v4
+
+      - name: Construir la imagen Docker
+        run: docker build -t mi-spring-app:${{ github.sha }} .
+
+      - name: Tamaño de la imagen (debe ser menor a 300 MB)
+        run: |
+          docker images mi-spring-app
+          BYTES=$(docker image inspect mi-spring-app:${{ github.sha }} --format '{{.Size}}')
+          echo "Tamaño: $((BYTES / 1024 / 1024)) MB"
+          test "$BYTES" -lt $((300 * 1024 * 1024))
+
+      - name: Levantar el contenedor y esperar /actuator/health
+        run: |
+          docker run -d --name smoke-test -p 8080:8080 mi-spring-app:${{ github.sha }}
+
+          for i in $(seq 1 15); do
+            if curl -sf http://localhost:8080/actuator/health | grep -q '"status":"UP"'; then
+              echo "La aplicacion respondio UP"
+              curl -s http://localhost:8080/actuator/health; echo
+              docker logs smoke-test 2>&1 | grep -m1 'profile is active' || true
+              exit 0
+            fi
+            echo "Esperando a que la aplicacion arranque... (${i}/15)"
+            sleep 2
+          done
+
+          echo "La aplicacion no respondio UP a tiempo"
+          docker logs smoke-test
+          exit 1
+
+      - name: Probar la API REST en el contenedor (perfil dev)
+        run: |
+          curl -sf -X POST http://localhost:8080/api/productos \
+            -H 'Content-Type: application/json' \
+            -d '{"nombre":"Teclado","precio":120.0,"categoria":"ELECTRONICA"}'; echo
+          curl -sf "http://localhost:8080/api/productos?categoria=ELECTRONICA" | grep -q Teclado
+          echo "GET /api/productos?categoria=ELECTRONICA -> contiene el producto creado"
+
+      - name: Detener el contenedor de prueba
+        if: always()
+        run: docker rm -f smoke-test || true
+
+      - name: Smoke test con perfil prod y PostgreSQL (variables de entorno)
+        run: |
+          # --network host: el contenedor alcanza el PostgreSQL del servicio en localhost:5432
+          docker run -d --name smoke-prod --network host \
+            -e SPRING_PROFILES_ACTIVE=prod \
+            -e DATASOURCE_URL=jdbc:postgresql://localhost:5432/appdb \
+            -e DATASOURCE_USER=appuser \
+            -e DATASOURCE_PASSWORD=apppass \
+            -e JPA_DDL_AUTO=update \
+            mi-spring-app:${{ github.sha }}
+
+          for i in $(seq 1 20); do
+            if curl -sf http://localhost:8080/actuator/health | grep -q '"status":"UP"'; then
+              echo "Perfil prod: /actuator/health -> $(curl -s http://localhost:8080/actuator/health)"
+              docker logs smoke-prod 2>&1 | grep 'profile is active'
+              docker logs smoke-prod 2>&1 | grep -q 'profile is active: "prod"'
+              CODE=$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8080/actuator/beans)
+              echo "Perfil prod: /actuator/beans -> HTTP $CODE (no expuesto)"
+              test "$CODE" = "404"
+              curl -sf -X POST http://localhost:8080/api/productos \
+                -H 'Content-Type: application/json' \
+                -d '{"nombre":"Monitor","precio":800.0,"categoria":"ELECTRONICA"}'; echo
+              exit 0
+            fi
+            echo "Esperando a que la aplicacion (prod) arranque... (${i}/20)"
+            sleep 2
+          done
+
+          echo "La aplicacion (prod) no respondio UP a tiempo"
+          docker logs smoke-prod
+          exit 1
+
+      - name: Detener el contenedor prod
+        if: always()
+        run: docker rm -f smoke-prod || true
