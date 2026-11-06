@@ -55,7 +55,7 @@ Se ejecuta automáticamente en cada **push** y **pull request** a `main`. Tiene 
 
 1. **`build-and-test`**
    - `actions/setup-java@v4` con JDK 21 y **caché de Maven** (`cache: maven`).
-   - `mvn clean verify`: compila, corre las **31 pruebas** (las 25 de la Unidad 10 más la prueba de contexto y las de Actuator) y el gate de cobertura de JaCoCo.
+   - `mvn clean verify`: compila, corre las **32 pruebas** (las 25 de la Unidad 10, la prueba de contexto y las 6 de Actuator) y el gate de cobertura de JaCoCo.
    - Publica `target/surefire-reports/` como artefacto (`if: always()`, 7 días).
 2. **`docker-build`** (`needs: build-and-test`)
    - Construye la imagen con el **mismo Dockerfile** de la Parte 1 (`docker build -t mi-spring-app:${{ github.sha }} .`) y verifica que pesa **menos de 300 MB**.
@@ -121,3 +121,35 @@ curl -i http://localhost:8080/actuator/beans # dev: 200 | prod: 404
 ```
 
 El pipeline se consulta en la pestaña **Actions** del repositorio.
+
+## Evidencia
+
+### Pipeline en GitHub Actions
+
+Cada push a `main` ejecutó el pipeline completo con los dos jobs en verde: [historial de ejecuciones](https://github.com/SantiagoCalceto/carreno-post1-u12/actions).
+
+![GitHub Actions con checks verdes](capturas/github-actions.png)
+![Jobs y pasos de cada ejecución](capturas/github-actions-jobs.png)
+
+**`build-and-test`**: 32 pruebas, gate de cobertura cumplido y reporte de Surefire publicado como artefacto.
+
+![Pruebas en el pipeline](capturas/pipeline-pruebas.png)
+
+**`docker-build`**: la imagen construida con el Dockerfile multi-stage pesa **260 MB** (menos de 300 MB).
+
+![Imagen Docker construida](capturas/docker-images.png)
+
+**Smoke test**:
+- **Perfil dev, sin variables:** `/actuator/health` → `UP` al cuarto intento, con el log `The following 1 profile is active: "dev"`, y la API responde.
+- **Perfil prod con variables de entorno y PostgreSQL:** `/actuator/health` → `{"status":"UP"}`, con el log `The following 1 profile is active: "prod"`, y `/actuator/beans` → **404**.
+
+![Smoke test respondiendo UP en el pipeline](capturas/smoke-test-log.png)
+
+### Ejecución local (JAR en el PC)
+
+El PC de desarrollo no tiene Docker Desktop, así que la imagen se construye y se prueba en el runner de GitHub Actions (capturas anteriores). En local se ejecutó el mismo JAR para comprobar los placeholders y los perfiles:
+
+- **Sin variables:** perfil `dev`, H2, `/actuator/health` con detalles y `/actuator/beans` → 200.
+- **Con `SPRING_PROFILES_ACTIVE=prod` y las variables `DATASOURCE_*`:** perfil `prod`, `/actuator/health` → `{"status":"UP"}`, `/actuator/info` expuesto, y `/actuator/env` y `/actuator/beans` → **404**.
+
+![Perfiles dev y prod en local con Actuator](capturas/actuator-health-local.png)
