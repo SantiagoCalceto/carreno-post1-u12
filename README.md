@@ -72,6 +72,14 @@ El repositorio incluye **`render.yaml`** (Blueprint de Render): un servicio web 
 2. Render lee `render.yaml`, crea la base y el servicio, y construye la imagen con el Dockerfile.
 3. Verificar `https://<servicio>.onrender.com/actuator/health` → `{"status":"UP"}`.
 
+**Desplegado:** la aplicación está en línea en Render con el perfil `prod` y una base PostgreSQL de Render.
+
+- URL de la aplicación: https://carreno-post1-u12.onrender.com
+- `/actuator/health`: https://carreno-post1-u12.onrender.com/actuator/health → `{"status":"UP","groups":["liveness","readiness"]}`
+- API: https://carreno-post1-u12.onrender.com/api/productos?categoria=ELECTRONICA
+
+El plan gratuito de Render apaga el servicio tras 15 minutos sin tráfico. La primera petición después de eso puede tardar unos 50 segundos mientras el contenedor vuelve a arrancar.
+
 ## Decisiones de diseño
 
 ### Parte 1
@@ -153,3 +161,14 @@ El PC de desarrollo no tiene Docker Desktop, así que la imagen se construye y s
 - **Con `SPRING_PROFILES_ACTIVE=prod` y las variables `DATASOURCE_*`:** perfil `prod`, `/actuator/health` → `{"status":"UP"}`, `/actuator/info` expuesto, y `/actuator/env` y `/actuator/beans` → **404**.
 
 ![Perfiles dev y prod en local con Actuator](capturas/actuator-health-local.png)
+
+### Despliegue en Render
+
+Render detectó `render.yaml` y creó el servicio web (Docker, plan Free, *Blueprint managed*) y la base `catalogo-db`. El servicio quedó **Live** con el commit `08f6911`.
+
+![Panel de Render con el despliegue activo](capturas/railway-panel.png)
+![Endpoint /actuator/health respondiendo en la URL pública](capturas/railway-health.png)
+
+Peticiones a la URL pública: la API guarda y consulta en el PostgreSQL de Render, `/actuator/info` responde y `/actuator/beans` da 404 porque el perfil es prod.
+
+![API y Actuator en la URL pública](capturas/railway-api.png)
