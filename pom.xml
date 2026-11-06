@@ -49,6 +49,12 @@
             <scope>runtime</scope>
         </dependency>
 
+        <!-- Parte 2: endpoints de monitoreo (/actuator/health, /actuator/info, ...) -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-actuator</artifactId>
+        </dependency>
+
         <!-- JUnit 5, Mockito, AssertJ, MockMvc, JsonPath -->
         <dependency>
             <groupId>org.springframework.boot</groupId>
