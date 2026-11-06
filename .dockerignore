@@ -1,0 +1,15 @@
+# Solo pom.xml y src/ entran al contexto de build: lo demas no se necesita
+# y excluirlo acelera el build y evita filtrar archivos locales a la imagen.
+target/
+.git/
+.github/
+.idea/
+.vscode/
+*.iml
+.mvn/
+mvnw
+mvnw.cmd
+*.md
+capturas/
+logs/
+render.yaml
